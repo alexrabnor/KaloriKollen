@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#10B981">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="KaloriKollen">
+  <meta name="description" content="Fota din mat och få kalorier och näringsvärden direkt med AI">
+  
+  <title>KaloriKollen - AI Kaloriräknare</title>
+  
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📸</text></svg>">
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/recharts@2.5.0/dist/Recharts.js"></script>
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overscroll-behavior: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    
+    input, button, textarea {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .animate-slide-up {
+      animation: slideUp 0.3s ease-out;
+    }
+
+    .install-prompt {
+      position: fixed;
+      bottom: 80px;
+      left: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+      color: white;
+      padding: 16px;
+      border-radius: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      z-index: 1000;
+      display: none;
+      animation: slideUp 0.3s ease-out;
+    }
+    
+    .install-prompt.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <div id="installPrompt" class="install-prompt">
+    <div class="flex items-center justify-between">
+      <div class="flex-1">
+        <p class="font-bold mb-1">📱 Installera KaloriKollen</p>
+        <p class="text-sm opacity-90">Lägg till på hemskärmen för bästa upplevelse</p>
+      </div>
+      <button id="installBtn" class="bg-white text-green-600 px-6 py-2 rounded-xl font-bold ml-4">
+        Installera
+      </button>
+    </div>
+  </div>
+
+  <script type="text/babel" src="/app.jsx"></script>
+
+  <script>
+    // Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('✅ Service Worker registered'))
+          .catch(err => console.log('❌ SW registration failed:', err));
+      });
+    }
+
+    // Install prompt
+    let deferredPrompt;
+    const installPrompt = document.getElementById('installPrompt');
+    const installBtn = document.getElementById('installBtn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installPrompt.classList.add('show');
+    });
+
+    installBtn.addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installPrompt.classList.remove('show');
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installPrompt.classList.remove('show');
+      console.log('🎉 PWA installed successfully!');
+    });
+  </script>
+</body>
+</html>
