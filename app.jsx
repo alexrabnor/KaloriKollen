@@ -435,5 +435,6 @@ Svara ENDAST med JSON i följande format (ingen annan text):
   );
 }
 // Render app
-const root = ReactDOM.createRoot(document.getElementById('root'));
+const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(KaloriApp));
+
