@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Scale, TrendingUp, History, X, Check } from 'lucide-react';
 
-export default function KaloriApp() {
+function KaloriApp() {
   const [currentView, setCurrentView] = useState('home');
   const [image, setImage] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -434,3 +434,6 @@ Svara ENDAST med JSON i följande format (ingen annan text):
     </div>
   );
 }
+// Render app
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(KaloriApp));

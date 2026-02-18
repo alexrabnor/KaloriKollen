@@ -1,0 +1,14 @@
+[0;1;32m●[0m plexmediaserver.service - Plex Media Server
+     Loaded: loaded (/lib/systemd/system/plexmediaserver.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Mon 2026-02-16 09:45:24 CET; 9h ago
+   Main PID: 1771 (Plex Media Serv)
+      Tasks: 47 (limit: 18926)
+     Memory: 127.8M
+        CPU: 2min 1.853s
+     CGroup: /system.slice/plexmediaserver.service
+             ├─1771 "/usr/lib/plexmediaserver/Plex Media Server"
+             ├─1943 "Plex Plug-in [com.plexapp.system]" /usr/lib/plexmediaserver/Resources/Plug-ins-121068a07/Framework.bundle/Contents/Resources/Versions/2/Python/bootstrap.py --server-version 1.43.0.10492-121068a07 /usr/lib/plexmediaserver/Resources/Plug-ins-121068a07/System.bundle
+             └─2408 "/usr/lib/plexmediaserver/Plex Tuner Service" /usr/lib/plexmediaserver/Resources/Tuner/Private /usr/lib/plexmediaserver/Resources/Tuner/Shared 1.43.0.10492-121068a07 32600
+
+feb 16 09:45:24 rabnoralex-Inspiron-7577 systemd[1]: Starting Plex Media Server...
+feb 16 09:45:24 rabnoralex-Inspiron-7577 systemd[1]: Started Plex Media Server.
