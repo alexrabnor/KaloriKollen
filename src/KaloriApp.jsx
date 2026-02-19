@@ -835,5 +835,4 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
 }
 
 // Render app
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(React.createElement(KaloriApp));
+export default KaloriApp;
