@@ -24,8 +24,8 @@ function KaloriApp() {
   const [loadingBarcode, setLoadingBarcode] = useState(false);
   const fileInputRef = useRef(null);
   
-  // Google Gemini API key från Vercel
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+  // OpenAI API key från Vercel (.env: VITE_OPENAI_API_KEY)
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY || '';
 
   // Load all data
   useEffect(() => {
@@ -63,10 +63,10 @@ function KaloriApp() {
     }
   };
 
-  // Image analysis with Google Gemini
+  // Image analysis with OpenAI GPT-4o Vision
   const analyzeImage = async (imageData) => {
     if (!apiKey) {
-      alert('Google Gemini API-nyckel saknas! Lägg till NEXT_PUBLIC_GEMINI_API_KEY i Vercel.');
+      alert('OpenAI API-nyckel saknas! Lägg till VITE_OPENAI_API_KEY i ditt .env.');
       setCurrentView('home');
       return;
     }
@@ -77,17 +77,35 @@ function KaloriApp() {
     try {
       const base64Data = imageData.split(',')[1];
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: 'Analysera denna maträtt och ge uppskattning av kalorier och makronutrienter. Svara ENDAST med JSON i detta format: {"dish":"namn på svenska","items":["ingrediens1","ingrediens2"],"calories":500,"protein":25,"carbs":45,"fat":15,"portion":"1 portion"}' },
-              { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-            ]
-          }]
-        })
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    'Analysera denna maträtt utifrån bilden och ge en uppskattning av kalorier och makronutrienter. ' +
+                    'Svara ENDAST med giltig JSON på detta EXAKTA format (ingen extra text, inga kommentarer): ' +
+                    '{"dish":"namn på svenska","items":["ingrediens1","ingrediens2"],"calories":500,"protein":25,"carbs":45,"fat":15,"portion":"1 portion"}',
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/jpeg;base64,${base64Data}`,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
       });
 
       const data = await response.json();
@@ -96,9 +114,13 @@ function KaloriApp() {
         throw new Error(data.error.message);
       }
 
-      const text = data.candidates[0].content.parts[0].text;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const analysis = JSON.parse(jsonMatch[0]);
+      const content = data.choices?.[0]?.message?.content;
+      if (!content || typeof content !== 'string') {
+        throw new Error('Ogiltigt svar från OpenAI (saknar textinnehåll).');
+      }
+
+      const cleaned = content.replace(/```json\s*|\s*```/g, '').trim();
+      const analysis = JSON.parse(cleaned);
       
       const mealEntry = {
         ...analysis,
@@ -115,8 +137,8 @@ function KaloriApp() {
       setResult(analysis);
       setCurrentView('result');
     } catch (error) {
-      console.error('Analysis error:', error);
-      alert('Kunde inte analysera bilden med Google Gemini: ' + error.message);
+      console.error('Analysis error (OpenAI):', error);
+      alert('Kunde inte analysera bilden med OpenAI: ' + error.message);
       setCurrentView('home');
     } finally {
       setAnalyzing(false);
@@ -299,10 +321,10 @@ function KaloriApp() {
     }
   };
 
-  // AI Coaching with Google Gemini
+  // AI Coaching with OpenAI GPT-4o
   const getAICoaching = async () => {
     if (!apiKey) {
-      alert('API-nyckel saknas!');
+      alert('OpenAI API-nyckel saknas! Lägg till VITE_OPENAI_API_KEY i ditt .env.');
       return;
     }
 
@@ -314,29 +336,50 @@ function KaloriApp() {
       const remaining = parseInt(goals.calories) - todayCals;
       const macros = getTodayMacros();
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Du är en hälsocoach. Ge personligt råd på svenska baserat på:
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `Du är en svensk personlig hälsocoach. Ge kort, konkret feedback på svenska baserat på:
 - Dagens kalorier: ${todayCals} av ${goals.calories} kcal (${remaining} kvar)
 - Protein: ${macros.protein.toFixed(0)}g av ${goals.protein}g
 - Kolhydrater: ${macros.carbs.toFixed(0)}g av ${goals.carbs}g
 - Fett: ${macros.fat.toFixed(0)}g av ${goals.fat}g
 
-Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad personen kan äta härnäst. Var positiv och motiverande!`
-            }]
-          }]
-        })
+Svara med 2–3 meningar på svenska. Var positiv och motiverande, och ge 1–3 konkreta förslag på vad personen kan äta härnäst för att närma sig sina mål.`,
+                },
+              ],
+            },
+          ],
+        }),
       });
 
       const data = await response.json();
-      const message = data.candidates[0].content.parts[0].text || 'Fortsätt så här! Du gör det bra! 💪';
+      const choice = data.choices?.[0]?.message;
+      let message = '';
+      if (choice) {
+        if (typeof choice.content === 'string') {
+          message = choice.content;
+        } else if (Array.isArray(choice.content)) {
+          message = choice.content.map((part) => part.text || '').join('\n');
+        }
+      }
+      if (!message) {
+        message = 'Fortsätt så här! Du gör det bra! 💪';
+      }
       setCoachingMessage(message);
     } catch (error) {
-      console.error('Coaching error:', error);
+      console.error('Coaching error (OpenAI):', error);
       setCoachingMessage('Fortsätt med ditt fantastiska arbete! Du är på rätt väg! 💪');
     } finally {
       setLoadingCoaching(false);
@@ -490,7 +533,7 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
             ),
             React.createElement('div', null,
               React.createElement('h1', { className: 'text-xl font-bold text-gray-900' }, 'KaloriKollen'),
-              React.createElement('p', { className: 'text-xs text-gray-500' }, 'Powered by Google Gemini')
+              React.createElement('p', { className: 'text-xs text-gray-500' }, 'Powered by OpenAI GPT-4o')
             )
           ),
           currentView === 'stats' && React.createElement('button', { onClick: exportData, className: 'p-2 bg-green-100 text-green-600 rounded-xl hover:bg-green-200 transition-colors' },
@@ -619,7 +662,7 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
           loadingCoaching ? React.createElement('div', { className: 'flex items-center justify-center py-8' },
             React.createElement('div', { className: 'animate-pulse text-center' },
               React.createElement('div', { className: 'text-3xl mb-2' }, '🤖'),
-              React.createElement('p', null, 'Google Gemini tänker...')
+              React.createElement('p', null, 'OpenAI tänker...')
             )
           ) : React.createElement('div', { className: 'bg-white bg-opacity-20 backdrop-blur-sm rounded-2xl p-4' },
             React.createElement('p', { className: 'text-white leading-relaxed' }, coachingMessage)
@@ -677,7 +720,7 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
             React.createElement(Camera, { className: 'w-10 h-10 text-white' })
           ),
           React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 mb-3' }, 'Analyserar...'),
-          React.createElement('p', { className: 'text-gray-600' }, 'Google Gemini AI identifierar maten'),
+          React.createElement('p', { className: 'text-gray-600' }, 'OpenAI GPT-4o identifierar maten'),
           image && React.createElement('img', { src: image, alt: 'Mat', className: 'mt-6 rounded-2xl shadow-md max-h-64 mx-auto' })
         )
       ),

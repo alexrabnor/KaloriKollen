@@ -1,7 +1,18 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, Scale, TrendingUp, X, Check, Zap, Target, Droplet, Download, Star, BarChart3, Home, Utensils, Calendar, Trash2 } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { BrowserMultiFormatReader } from '@zxing/library';
+import { db, getOrCreateUserId } from './firebase';
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+} from 'firebase/firestore';
 
 function KaloriApp() {
-  const { useState, useRef, useEffect } = React;
-  const { Camera, Scale, TrendingUp, X, Check, Zap, Target, Droplet, Download, Star, BarChart3, Home, Utensils, Calendar, Trash2 } = lucide;
 
   // State
   const [currentView, setCurrentView] = useState('home');
@@ -23,36 +34,101 @@ function KaloriApp() {
   const [barcode, setBarcode] = useState('');
   const [barcodeProduct, setBarcodeProduct] = useState(null);
   const [loadingBarcode, setLoadingBarcode] = useState(false);
+  const [scanningBarcode, setScanningBarcode] = useState(false);
+  const [barcodeError, setBarcodeError] = useState('');
   const fileInputRef = useRef(null);
-  
-  // Google Gemini API key från Vercel
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+  const barcodeVideoRef = useRef(null);
+  const barcodeReaderRef = useRef(null);
+  const barcodeControlsRef = useRef(null);
+  const userIdRef = useRef(getOrCreateUserId());
 
-  // Load all data
+  // OpenAI API key från Vercel (.env: VITE_OPENAI_API_KEY)
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY || '';
+
+  // Load data from Firestore (weights, meals, water) + localStorage (övrigt)
   useEffect(() => {
-    try {
-      const data = {
-        weights: JSON.parse(localStorage.getItem('weights') || '[]'),
-        meals: JSON.parse(localStorage.getItem('meals') || '[]'),
-        water: JSON.parse(localStorage.getItem('water') || '[]'),
-        favorites: JSON.parse(localStorage.getItem('favorites') || '[]'),
-        goals: JSON.parse(localStorage.getItem('goals') || '{"weight":"","calories":"2000","protein":"150","carbs":"200","fat":"65","water":"2000"}'),
-        height: localStorage.getItem('height') || '',
-        streak: parseInt(localStorage.getItem('streak') || '0'),
-        badges: JSON.parse(localStorage.getItem('badges') || '[]')
-      };
-      
-      setWeights(data.weights);
-      setMeals(data.meals);
-      setWaterIntake(data.water);
-      setFavorites(data.favorites);
-      setGoals(data.goals);
-      setUserHeight(data.height);
-      setStreak(data.streak);
-      setBadges(data.badges);
-    } catch (error) {
-      console.log('Loading data...', error);
-    }
+    const loadData = async () => {
+      try {
+        const userId = userIdRef.current;
+
+        // Weights
+        const weightsSnap = await getDocs(
+          query(
+            collection(db, 'weights'),
+            where('userId', '==', userId),
+            orderBy('date', 'desc')
+          )
+        );
+        const weightsData = weightsSnap.docs.map(doc => {
+          const d = doc.data();
+          const date = d.date?.toDate ? d.date.toDate() : new Date(d.date);
+          return {
+            weight: d.weight,
+            date: date.toISOString(),
+            dateStr: date.toLocaleDateString('sv-SE'),
+          };
+        });
+
+        // Meals
+        const mealsSnap = await getDocs(
+          query(
+            collection(db, 'meals'),
+            where('userId', '==', userId),
+            orderBy('date', 'desc')
+          )
+        );
+        const mealsData = mealsSnap.docs.map(doc => {
+          const d = doc.data();
+          const date = d.date?.toDate ? d.date.toDate() : new Date(d.date);
+          return {
+            ...d,
+            date: date.toISOString(),
+            dateStr: date.toLocaleDateString('sv-SE'),
+            timeStr: date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }),
+          };
+        });
+
+        // Water
+        const waterSnap = await getDocs(
+          query(
+            collection(db, 'waterIntake'),
+            where('userId', '==', userId),
+            orderBy('date', 'desc')
+          )
+        );
+        const waterData = waterSnap.docs.map(doc => {
+          const d = doc.data();
+          const date = d.date?.toDate ? d.date.toDate() : new Date(d.date);
+          return {
+            amount: d.amount,
+            date: date.toISOString(),
+            dateStr: date.toLocaleDateString('sv-SE'),
+            timeStr: date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }),
+          };
+        });
+
+        setWeights(weightsData);
+        setMeals(mealsData);
+        setWaterIntake(waterData);
+
+        // Övriga inställningar från localStorage (goals, favorites etc)
+        const storedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+        const storedGoals = JSON.parse(localStorage.getItem('goals') || '{"weight":"","calories":"2000","protein":"150","carbs":"200","fat":"65","water":"2000"}');
+        const storedHeight = localStorage.getItem('height') || '';
+        const storedStreak = parseInt(localStorage.getItem('streak') || '0');
+        const storedBadges = JSON.parse(localStorage.getItem('badges') || '[]');
+
+        setFavorites(storedFavorites);
+        setGoals(storedGoals);
+        setUserHeight(storedHeight);
+        setStreak(storedStreak);
+        setBadges(storedBadges);
+      } catch (error) {
+        console.log('Loading data from Firestore...', error);
+      }
+    };
+
+    loadData();
   }, []);
 
   // Save functions
@@ -64,10 +140,10 @@ function KaloriApp() {
     }
   };
 
-  // Image analysis with Google Gemini
+  // Image analysis with OpenAI GPT-4o Vision
   const analyzeImage = async (imageData) => {
     if (!apiKey) {
-      alert('Google Gemini API-nyckel saknas! Lägg till NEXT_PUBLIC_GEMINI_API_KEY i Vercel.');
+      alert('OpenAI API-nyckel saknas! Lägg till VITE_OPENAI_API_KEY i ditt .env.');
       setCurrentView('home');
       return;
     }
@@ -78,17 +154,35 @@ function KaloriApp() {
     try {
       const base64Data = imageData.split(',')[1];
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: 'Analysera denna maträtt och ge uppskattning av kalorier och makronutrienter. Svara ENDAST med JSON i detta format: {"dish":"namn på svenska","items":["ingrediens1","ingrediens2"],"calories":500,"protein":25,"carbs":45,"fat":15,"portion":"1 portion"}' },
-              { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-            ]
-          }]
-        })
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    'Analysera denna maträtt utifrån bilden och ge en uppskattning av kalorier och makronutrienter. ' +
+                    'Svara ENDAST med giltig JSON på detta EXAKTA format (ingen extra text, inga kommentarer): ' +
+                    '{"dish":"namn på svenska","items":["ingrediens1","ingrediens2"],"calories":500,"protein":25,"carbs":45,"fat":15,"portion":"1 portion"}',
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/jpeg;base64,${base64Data}`,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
       });
 
       const data = await response.json();
@@ -97,27 +191,43 @@ function KaloriApp() {
         throw new Error(data.error.message);
       }
 
-      const text = data.candidates[0].content.parts[0].text;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const analysis = JSON.parse(jsonMatch[0]);
+      const content = data.choices?.[0]?.message?.content;
+      if (!content || typeof content !== 'string') {
+        throw new Error('Ogiltigt svar från OpenAI (saknar textinnehåll).');
+      }
+
+      const cleaned = content.replace(/```json\s*|\s*```/g, '').trim();
+      const analysis = JSON.parse(cleaned);
       
+      const mealDate = new Date();
       const mealEntry = {
         ...analysis,
         image: imageData,
-        date: new Date().toISOString(),
-        dateStr: new Date().toLocaleDateString('sv-SE'),
-        timeStr: new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+        date: mealDate.toISOString(),
+        dateStr: mealDate.toLocaleDateString('sv-SE'),
+        timeStr: mealDate.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
       };
       
       const updatedMeals = [mealEntry, ...meals];
       setMeals(updatedMeals);
       saveToStorage('meals', updatedMeals);
+
+      try {
+        await addDoc(collection(db, 'meals'), {
+          userId: userIdRef.current,
+          ...analysis,
+          image: imageData,
+          date: mealDate,
+        });
+      } catch (error) {
+        console.error('Error saving meal to Firestore:', error);
+      }
       
       setResult(analysis);
       setCurrentView('result');
     } catch (error) {
-      console.error('Analysis error:', error);
-      alert('Kunde inte analysera bilden med Google Gemini: ' + error.message);
+      console.error('Analysis error (OpenAI):', error);
+      alert('Kunde inte analysera bilden med OpenAI: ' + error.message);
       setCurrentView('home');
     } finally {
       setAnalyzing(false);
@@ -137,7 +247,7 @@ function KaloriApp() {
   };
 
   // Weight functions
-  const addWeight = () => {
+  const addWeight = async () => {
     if (newWeight && parseFloat(newWeight) > 0) {
       const weightEntry = {
         weight: parseFloat(newWeight),
@@ -147,6 +257,16 @@ function KaloriApp() {
       const updatedWeights = [weightEntry, ...weights];
       setWeights(updatedWeights);
       saveToStorage('weights', updatedWeights);
+
+      try {
+        await addDoc(collection(db, 'weights'), {
+          userId: userIdRef.current,
+          weight: weightEntry.weight,
+          date: new Date(),
+        });
+      } catch (error) {
+        console.error('Error saving weight to Firestore:', error);
+      }
       setNewWeight('');
     }
   };
@@ -158,7 +278,7 @@ function KaloriApp() {
   };
 
   // Water functions
-  const addWater = (amount) => {
+  const addWater = async (amount) => {
     const waterEntry = {
       amount: amount,
       date: new Date().toISOString(),
@@ -168,6 +288,16 @@ function KaloriApp() {
     const updated = [waterEntry, ...waterIntake];
     setWaterIntake(updated);
     saveToStorage('water', updated);
+
+    try {
+      await addDoc(collection(db, 'waterIntake'), {
+        userId: userIdRef.current,
+        amount: waterEntry.amount,
+        date: new Date(),
+      });
+    } catch (error) {
+      console.error('Error saving water to Firestore:', error);
+    }
   };
 
   // Favorites
@@ -183,6 +313,63 @@ function KaloriApp() {
     const updated = favorites.filter((_, i) => i !== index);
     setFavorites(updated);
     saveToStorage('favorites', updated);
+  };
+
+  // Barcode camera scanning
+  const stopBarcodeScanner = () => {
+    try {
+      if (barcodeControlsRef.current && typeof barcodeControlsRef.current.stop === 'function') {
+        barcodeControlsRef.current.stop();
+      }
+      const reader = barcodeReaderRef.current;
+      if (reader) {
+        reader.reset();
+      }
+    } catch (error) {
+      console.error('Kunde inte stoppa streckkodsskannern:', error);
+    }
+    setScanningBarcode(false);
+  };
+
+  const startBarcodeScanner = async () => {
+    if (scanningBarcode || !barcodeVideoRef.current) return;
+
+    setBarcodeError('');
+
+    try {
+      let reader = barcodeReaderRef.current;
+      if (!reader) {
+        reader = new BrowserMultiFormatReader();
+        barcodeReaderRef.current = reader;
+      }
+
+      const devices = await reader.listVideoInputDevices();
+      if (!devices.length) {
+        setBarcodeError('Ingen kamera hittades på enheten.');
+        return;
+      }
+
+      const deviceId = devices[0].deviceId;
+      setScanningBarcode(true);
+
+      barcodeControlsRef.current = await reader.decodeFromVideoDevice(
+        deviceId,
+        barcodeVideoRef.current,
+        (result, err, controls) => {
+          if (result) {
+            const text = result.getText();
+            controls.stop();
+            barcodeControlsRef.current = null;
+            setScanningBarcode(false);
+            searchBarcode(text);
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Kunde inte starta streckkodsskanning:', error);
+      setBarcodeError('Kunde inte starta kameran. Kontrollera kamerabehörighet.');
+      setScanningBarcode(false);
+    }
   };
 
   // Stats calculations
@@ -225,8 +412,8 @@ function KaloriApp() {
   const calculateBMI = () => {
     if (!userHeight || weights.length === 0) return null;
     const heightM = parseFloat(userHeight) / 100;
-    const weight = weights[0].weight;
-    return (weight / (heightM * heightM)).toFixed(1);
+    const latestWeight = weights[0].weight;
+    return (latestWeight / (heightM * heightM)).toFixed(1);
   };
 
   const exportData = () => {
@@ -300,10 +487,10 @@ function KaloriApp() {
     }
   };
 
-  // AI Coaching with Google Gemini
+  // AI Coaching with OpenAI GPT-4o
   const getAICoaching = async () => {
     if (!apiKey) {
-      alert('API-nyckel saknas!');
+      alert('OpenAI API-nyckel saknas! Lägg till VITE_OPENAI_API_KEY i ditt .env.');
       return;
     }
 
@@ -315,29 +502,50 @@ function KaloriApp() {
       const remaining = parseInt(goals.calories) - todayCals;
       const macros = getTodayMacros();
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Du är en hälsocoach. Ge personligt råd på svenska baserat på:
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `Du är en svensk personlig hälsocoach. Ge kort, konkret feedback på svenska baserat på:
 - Dagens kalorier: ${todayCals} av ${goals.calories} kcal (${remaining} kvar)
 - Protein: ${macros.protein.toFixed(0)}g av ${goals.protein}g
 - Kolhydrater: ${macros.carbs.toFixed(0)}g av ${goals.carbs}g
 - Fett: ${macros.fat.toFixed(0)}g av ${goals.fat}g
 
-Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad personen kan äta härnäst. Var positiv och motiverande!`
-            }]
-          }]
-        })
+Svara med 2–3 meningar på svenska. Var positiv och motiverande, och ge 1–3 konkreta förslag på vad personen kan äta härnäst för att närma sig sina mål.`,
+                },
+              ],
+            },
+          ],
+        }),
       });
 
       const data = await response.json();
-      const message = data.candidates[0].content.parts[0].text || 'Fortsätt så här! Du gör det bra! 💪';
+      const choice = data.choices?.[0]?.message;
+      let message = '';
+      if (choice) {
+        if (typeof choice.content === 'string') {
+          message = choice.content;
+        } else if (Array.isArray(choice.content)) {
+          message = choice.content.map((part) => part.text || '').join('\n');
+        }
+      }
+      if (!message) {
+        message = 'Fortsätt så här! Du gör det bra! 💪';
+      }
       setCoachingMessage(message);
     } catch (error) {
-      console.error('Coaching error:', error);
+      console.error('Coaching error (OpenAI):', error);
       setCoachingMessage('Fortsätt med ditt fantastiska arbete! Du är på rätt väg! 💪');
     } finally {
       setLoadingCoaching(false);
@@ -356,13 +564,24 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
     }
   }, [meals]);
 
-  // Barcode Search
-  const searchBarcode = async () => {
-    if (!barcode) return;
-    
+  // Start/stop barcode scanner when view changes
+  useEffect(() => {
+    if (currentView === 'barcode') {
+      startBarcodeScanner();
+    } else {
+      stopBarcodeScanner();
+    }
+  }, [currentView]);
+
+  // Barcode Search (Open Food Facts)
+  const searchBarcode = async (code) => {
+    const value = code || barcode;
+    if (!value) return;
+
+    setBarcode(value);
     setLoadingBarcode(true);
     try {
-      const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json`);
+      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${value}.json`);
       const data = await response.json();
       
       if (data.status === 1) {
@@ -387,9 +606,10 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
     }
   };
 
-  const addBarcodeProduct = () => {
+  const addBarcodeProduct = async () => {
     if (!barcodeProduct) return;
     
+    const mealDate = new Date();
     const mealEntry = {
       dish: barcodeProduct.name,
       items: [barcodeProduct.brand].filter(Boolean),
@@ -399,14 +619,24 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
       fat: barcodeProduct.fat,
       image: barcodeProduct.image,
       portion: '100g',
-      date: new Date().toISOString(),
-      dateStr: new Date().toLocaleDateString('sv-SE'),
-      timeStr: new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+      date: mealDate.toISOString(),
+      dateStr: mealDate.toLocaleDateString('sv-SE'),
+      timeStr: mealDate.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
     };
     
     const updatedMeals = [mealEntry, ...meals];
     setMeals(updatedMeals);
     saveToStorage('meals', updatedMeals);
+
+    try {
+      await addDoc(collection(db, 'meals'), {
+        userId: userIdRef.current,
+        ...mealEntry,
+        date: mealDate,
+      });
+    } catch (error) {
+      console.error('Error saving barcode meal to Firestore:', error);
+    }
     
     setBarcode('');
     setBarcodeProduct(null);
@@ -491,7 +721,7 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
             ),
             React.createElement('div', null,
               React.createElement('h1', { className: 'text-xl font-bold text-gray-900' }, 'KaloriKollen'),
-              React.createElement('p', { className: 'text-xs text-gray-500' }, 'Powered by Google Gemini')
+              React.createElement('p', { className: 'text-xs text-gray-500' }, 'Powered by OpenAI GPT-4o')
             )
           ),
           currentView === 'stats' && React.createElement('button', { onClick: exportData, className: 'p-2 bg-green-100 text-green-600 rounded-xl hover:bg-green-200 transition-colors' },
@@ -620,7 +850,7 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
           loadingCoaching ? React.createElement('div', { className: 'flex items-center justify-center py-8' },
             React.createElement('div', { className: 'animate-pulse text-center' },
               React.createElement('div', { className: 'text-3xl mb-2' }, '🤖'),
-              React.createElement('p', null, 'Google Gemini tänker...')
+              React.createElement('p', null, 'OpenAI tänker...')
             )
           ) : React.createElement('div', { className: 'bg-white bg-opacity-20 backdrop-blur-sm rounded-2xl p-4' },
             React.createElement('p', { className: 'text-white leading-relaxed' }, coachingMessage)
@@ -678,7 +908,7 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
             React.createElement(Camera, { className: 'w-10 h-10 text-white' })
           ),
           React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 mb-3' }, 'Analyserar...'),
-          React.createElement('p', { className: 'text-gray-600' }, 'Google Gemini AI identifierar maten'),
+          React.createElement('p', { className: 'text-gray-600' }, 'OpenAI GPT-4o identifierar maten'),
           image && React.createElement('img', { src: image, alt: 'Mat', className: 'mt-6 rounded-2xl shadow-md max-h-64 mx-auto' })
         )
       ),
@@ -746,22 +976,98 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
         React.createElement('p', { className: 'text-gray-600' }, `${meals.length} måltider registrerade`)
       ),
 
-      currentView === 'weight' && React.createElement('div', { className: 'p-6' },
+      currentView === 'weight' && React.createElement('div', { className: 'p-6 space-y-6' },
         React.createElement('h2', { className: 'text-2xl font-bold mb-4' }, 'Viktspårning'),
-        React.createElement('div', { className: 'bg-white rounded-3xl p-6' },
-          React.createElement('input', {
-            type: 'number',
-            value: newWeight,
-            onChange: (e) => setNewWeight(e.target.value),
-            placeholder: '75.5',
-            className: 'w-full px-4 py-3 border-2 rounded-xl mb-3'
-          }),
-          React.createElement('button', { onClick: addWeight, className: 'w-full py-3 bg-green-600 text-white rounded-xl' }, 'Spara vikt')
+        React.createElement('div', { className: 'bg-white rounded-3xl p-6 space-y-6' },
+          React.createElement('div', { className: 'flex space-x-3' },
+            React.createElement('input', {
+              type: 'number',
+              step: '0.1',
+              value: newWeight,
+              onChange: (e) => setNewWeight(e.target.value),
+              placeholder: '75.5',
+              className: 'flex-1 px-4 py-3 border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:outline-none text-lg'
+            }),
+            React.createElement('button', {
+              onClick: addWeight,
+              disabled: !newWeight || parseFloat(newWeight) <= 0,
+              className: 'px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all'
+            },
+              React.createElement(Check, { className: 'w-6 h-6' })
+            )
+          ),
+
+          weights.length > 0 && React.createElement('div', { className: 'space-y-4' },
+            React.createElement('h3', { className: 'font-bold text-gray-900 flex items-center space-x-2' },
+              React.createElement(TrendingUp, { className: 'w-5 h-5 text-blue-500' }),
+              React.createElement('span', null, 'Vikt över tid (veckovis)')
+            ),
+            React.createElement('div', { className: 'w-full h-64' },
+              React.createElement(ResponsiveContainer, { width: '100%', height: '100%' },
+                React.createElement(LineChart, {
+                  data: Object.values(
+                    weights.reduce((acc, entry) => {
+                      const d = new Date(entry.date);
+                      const year = d.getFullYear();
+                      const week = Math.ceil((((d - new Date(year, 0, 1)) / 86400000) + new Date(year, 0, 1).getDay() + 1) / 7);
+                      const key = `${year}-v${week}`;
+                      if (!acc[key]) {
+                        acc[key] = { week: key, total: 0, count: 0 };
+                      }
+                      acc[key].total += entry.weight;
+                      acc[key].count += 1;
+                      return acc;
+                    }, {})
+                  ).map(w => ({
+                    week: w.week,
+                    weight: w.total / w.count,
+                  })),
+                  margin: { top: 10, right: 20, left: 0, bottom: 0 },
+                },
+                  React.createElement(CartesianGrid, { strokeDasharray: '3 3' }),
+                  React.createElement(XAxis, { dataKey: 'week' }),
+                  React.createElement(YAxis, { unit: ' kg' }),
+                  React.createElement(Tooltip, { formatter: (value) => [`${value.toFixed(1)} kg`, 'Vikt'] }),
+                  React.createElement(Line, {
+                    type: 'monotone',
+                    dataKey: 'weight',
+                    stroke: '#3B82F6',
+                    strokeWidth: 3,
+                    dot: { r: 4 },
+                    activeDot: { r: 6 },
+                  })
+                )
+              )
+            ),
+
+            React.createElement('div', { className: 'space-y-3 max-h-96 overflow-y-auto' },
+              ...weights.map((entry, index) =>
+                React.createElement('div', {
+                  key: index,
+                  className: 'flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl border border-gray-100'
+                },
+                  React.createElement('div', null,
+                    React.createElement('p', { className: 'text-2xl font-bold text-gray-900' }, `${entry.weight} kg`),
+                    React.createElement('p', { className: 'text-sm text-gray-600' }, entry.dateStr)
+                  ),
+                  React.createElement('button', {
+                    onClick: () => deleteWeight(index),
+                    className: 'p-2 text-gray-400 hover:text-red-500 transition-colors'
+                  },
+                    React.createElement(Trash2, { className: 'w-5 h-5' })
+                  )
+                )
+              )
+            )
+          )
         )
       ),
 
-      currentView === 'water' && React.createElement('div', { className: 'p-6' },
-        React.createElement('h2', { className: 'text-2xl font-bold mb-4' }, 'Vattenintag'),
+      currentView === 'water' && React.createElement('div', { className: 'p-6 space-y-6' },
+        React.createElement('h2', { className: 'text-2xl font-bold mb-2' }, 'Vattenintag'),
+        React.createElement('p', { className: 'text-sm text-gray-600 mb-2' },
+          `Dagens vatten: ${getTodayWater()} / ${goals.water} ml`
+        ),
         React.createElement('div', { className: 'grid grid-cols-3 gap-3' },
           React.createElement('button', { onClick: () => addWater(250), className: 'py-4 bg-blue-500 text-white rounded-xl' }, '250ml'),
           React.createElement('button', { onClick: () => addWater(500), className: 'py-4 bg-blue-500 text-white rounded-xl' }, '500ml'),
@@ -805,6 +1111,21 @@ Ge ett kort, uppmuntrande råd (2-3 meningar) med konkreta förslag på vad pers
         React.createElement('button', { onClick: () => setCurrentView('home'), className: 'text-gray-600' }, '← Tillbaka'),
         React.createElement('div', { className: 'bg-white rounded-3xl p-6' },
           React.createElement('h2', { className: 'text-xl font-bold mb-4' }, 'Streckkodsskanning'),
+          React.createElement('p', { className: 'text-sm text-gray-600 mb-3' },
+            scanningBarcode
+              ? 'Rikta kameran mot streckkoden...'
+              : 'Kameran är pausad. Gå tillbaka och öppna Streckkod igen om du vill starta om.'
+          ),
+          React.createElement('div', { className: 'w-full aspect-video bg-black rounded-2xl overflow-hidden flex items-center justify-center mb-4' },
+            React.createElement('video', {
+              ref: barcodeVideoRef,
+              className: 'w-full h-full object-contain',
+              autoPlay: true,
+              muted: true,
+              playsInline: true,
+            })
+          ),
+          barcodeError && React.createElement('p', { className: 'text-sm text-red-500 mb-3' }, barcodeError),
           React.createElement('input', {
             type: 'text',
             value: barcode,
